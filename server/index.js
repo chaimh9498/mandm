@@ -15,8 +15,8 @@ const PORT = Number(process.env.PORT || 3001);
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const isProduction = process.env.NODE_ENV === 'production';
 if (!process.env.SESSION_SECRET) console.warn('WARNING: SESSION_SECRET unset. Sessions will reset at restart. Set it before deployment.');
-if (!process.env.ADMIN_PASSWORD) console.warn('WARNING: ADMIN_PASSWORD unset. Admin sign-in disabled until configured.');
-if (process.env.ADMIN_PASSWORD === 'replace-with-a-strong-unique-password') console.warn('WARNING: change your sample ADMIN_PASSWORD before publishing.');
+
+
 
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -38,9 +38,8 @@ function validToken(token) {
   try { const data = JSON.parse(Buffer.from(payload, 'base64url')); return data.role === 'admin' && data.expires > Date.now(); } catch { return false; }
 }
 function isAdmin(req) {
-  if (process.env.CLERK_OWNER_USER_ID && getAuth(req).userId === process.env.CLERK_OWNER_USER_ID) return true;
-  const cookie = req.headers.cookie?.split(';').find(x => x.trim().startsWith('catalog_admin='));
-  return validToken(cookie?.trim().slice('catalog_admin='.length));
+  const ownerId = process.env.CLERK_OWNER_USER_ID;
+  return Boolean(ownerId && getAuth(req).userId === ownerId);
 }
 function auth(req, res, next) { if (!isAdmin(req)) return res.status(401).json({ error: 'Sign in to manage your shop.' }); next(); }
 function sameOrigin(req, res, next) {
@@ -159,26 +158,9 @@ app.get('/api/products', customerAuth, (_req, res) => {
   res.json(readStore().products.filter(p => p.active).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)));
 });
 const loginAttempts = new Map();
-app.post('/api/admin/login', sameOrigin, (req, res) => {
-  if (!process.env.ADMIN_PASSWORD) return res.status(503).json({ error: 'Set ADMIN_PASSWORD in .env to enable admin access.' });
-  const ip = req.ip;
-  const previous = loginAttempts.get(ip) || { count: 0, start: Date.now() };
-  if (Date.now() - previous.start > 15 * 60 * 1000) { previous.count = 0; previous.start = Date.now(); }
-  if (previous.count >= 10) return res.status(429).json({ error: 'Too many attempts. Please try again in 15 minutes.' });
-  const a = crypto.createHash('sha256').update(String(req.body?.password || '')).digest();
-  const b = crypto.createHash('sha256').update(process.env.ADMIN_PASSWORD).digest();
-  if (!crypto.timingSafeEqual(a,b)) {
-    previous.count++; loginAttempts.set(ip, previous);
-    return res.status(401).json({ error: 'Incorrect password.' });
-  }
-  loginAttempts.delete(ip);
-  res.setHeader('Set-Cookie', `catalog_admin=${createToken()}; Max-Age=604800; ${cookieOptions}`);
-  res.json({ ok: true });
-});
-app.post('/api/admin/logout', sameOrigin, (_req, res) => {
-  res.setHeader('Set-Cookie', `catalog_admin=; Max-Age=0; ${cookieOptions}`);
-  res.json({ ok: true });
-});
+// All owner access is controlled by Clerk identity; legacy passwords are disabled.
+app.post('/api/admin/login', (_req, res) => res.status(410).json({ error: 'Please sign in with Clerk as the authorized owner.' }));
+app.post('/api/admin/logout', (_req, res) => res.json({ ok: true }));
 app.get('/api/admin/me', (req, res) => res.json({ admin: isAdmin(req), clerkUserId: getAuth(req).userId || null }));
 app.get('/api/admin/data', auth, (_req, res) => {
   const db = readStore();
