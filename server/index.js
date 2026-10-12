@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { clerkMiddleware, getAuth } from '@clerk/express';
 import express from 'express';
 import multer from 'multer';
 import crypto from 'node:crypto';
@@ -9,6 +10,7 @@ import { stripeSettings, stripeReady, openCheckout, verifyWebhook, getStripe } f
 
 const app = express();
 app.disable('x-powered-by');
+app.use(clerkMiddleware());
 const PORT = Number(process.env.PORT || 3001);
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const isProduction = process.env.NODE_ENV === 'production';
@@ -36,6 +38,7 @@ function validToken(token) {
   try { const data = JSON.parse(Buffer.from(payload, 'base64url')); return data.role === 'admin' && data.expires > Date.now(); } catch { return false; }
 }
 function isAdmin(req) {
+  if (process.env.CLERK_OWNER_USER_ID && getAuth(req).userId === process.env.CLERK_OWNER_USER_ID) return true;
   const cookie = req.headers.cookie?.split(';').find(x => x.trim().startsWith('catalog_admin='));
   return validToken(cookie?.trim().slice('catalog_admin='.length));
 }
@@ -53,8 +56,8 @@ const cookieOptions = `HttpOnly; Path=/; SameSite=Strict${isProduction ? '; Secu
 // Customer access is checked on the server. Never embed the shared access code in the frontend.
 // In production, fail closed until the code and session secret are configured.
 const customerCode = process.env.CUSTOMER_ACCESS_CODE || '';
-if (isProduction && (customerCode.length < 8 || !process.env.SESSION_SECRET)) {
-  throw new Error('Production requires CUSTOMER_ACCESS_CODE (8+ characters) and SESSION_SECRET.');
+if (isProduction && (!process.env.CLERK_OWNER_USER_ID || !process.env.CLERK_SECRET_KEY || !process.env.CLERK_PUBLISHABLE_KEY)) {
+  throw new Error('Production requires CLERK_OWNER_USER_ID, CLERK_SECRET_KEY, and CLERK_PUBLISHABLE_KEY.');
 }
 const customerEnabled = customerCode.length >= 8;
 const customerAttempts = new Map();
@@ -76,7 +79,8 @@ function customerSession(req) {
   } catch { return false; }
 }
 function customerAuth(req, res, next) {
-  if (!customerEnabled) return res.status(503).json({ error: 'Customer access is not configured.' });
+  if (getAuth(req).userId) return next();
+  if (!customerEnabled) return res.status(401).json({ error: 'Please sign in to browse the catalog.' });
   if (customerSession(req) || isAdmin(req)) return next();
   return res.status(401).json({ error: 'Enter the customer access code to view the catalog.' });
 }
@@ -113,7 +117,7 @@ app.post('/api/customer/access', accessCors, express.json({ limit: '5kb' }), (re
   res.json({ ok: true });
 });
 app.get('/access', (req,res) => {
-  if (customerEnabled && (customerSession(req) || isAdmin(req))) return res.redirect('/');
+  if (getAuth(req).userId || customerSession(req) || isAdmin(req)) return res.redirect('/');
   res.type('html').send(accessPage);
 });
 
@@ -177,7 +181,7 @@ app.post('/api/admin/logout', sameOrigin, (_req, res) => {
   res.setHeader('Set-Cookie', `catalog_admin=; Max-Age=0; ${cookieOptions}`);
   res.json({ ok: true });
 });
-app.get('/api/admin/me', (req, res) => res.json({ admin: isAdmin(req) }));
+app.get('/api/admin/me', (req, res) => res.json({ admin: isAdmin(req), clerkUserId: getAuth(req).userId || null }));
 app.get('/api/admin/data', auth, (_req, res) => {
   const db = readStore();
   res.json({ ...db, stripe: { ...stripeSettings(), ready: stripeReady() } });
@@ -309,7 +313,7 @@ if (fs.existsSync(dist)) {
   app.use(express.static(dist, { index: false }));
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found.' });
-    if (!customerEnabled || (!customerSession(req) && !isAdmin(req))) return res.redirect('/access');
+    if (!getAuth(req).userId && !customerSession(req) && !isAdmin(req)) return res.redirect('/access');
     res.sendFile(path.join(dist, 'index.html'));
   });
 }
