@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ClerkProvider, SignIn, SignUp, SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, BarChart3, Check, ChevronDown,
   CreditCard, Edit3, Eye, EyeOff, ImagePlus, LayoutDashboard, LockKeyhole,
@@ -127,7 +128,7 @@ function App() {
       <div className="announcement"><Sparkles size={13} /> {s.announcement || 'Discover your new favorite things.'} <ArrowRight size={13}/></div>
       <header className="site-header"><div className="header-inner">
         <button className="brand" onClick={() => { navigate('shop'); setCategory('All products'); setSearch(''); }}><span className="brand-logo">M<span>&</span>M</span><span className="brand-name">{s.name}</span></button>
-        <nav className="header-nav"><a href="#collection">Shop all</a><a href="#story">Why M&M</a><button onClick={() => navigate('admin')}>Seller dashboard</button></nav>
+        <nav className="header-nav"><a href="#collection">Shop all</a><a href="#story">Why M&M</a><button onClick={() => navigate('admin')}>Seller dashboard</button><SignedOut><SignInButton mode="modal"><button>Sign in / Register</button></SignInButton></SignedOut><SignedIn><UserButton/></SignedIn></nav>
         <div className="header-actions"><button className="icon-button search-top" aria-label="Go to search" onClick={() => document.getElementById('product-search')?.focus()}><Search size={20}/></button><button className="bag-button" onClick={() => setCartOpen(true)} aria-label={`Shopping bag with ${cartCount} items`}><ShoppingBag size={20}/><span className="bag-label">Bag</span><span className="bag-count">{cartCount}</span></button><button className="icon-button mobile-admin" onClick={() => navigate('admin')} aria-label="Seller dashboard"><Menu size={23}/></button></div>
       </div></header>
       {checkoutMessage && <div className="checkout-banner"><Check size={20}/><span>{checkoutMessage}</span><button aria-label="Dismiss" onClick={() => setCheckoutMessage(null)}><X size={16}/></button></div>}
@@ -195,4 +196,12 @@ function Payments({ stripe }) {
   const rows = [['Enable Stripe', stripe.enabledFlag], ['Secret API key', stripe.hasSecretKey], ['Webhook signing secret', stripe.hasWebhookSecret], ['Public base URL', stripe.hasBaseUrl]];
   return <><div className="dashboard-heading"><div><div className="eyebrow">PAYMENTS / INTEGRATIONS</div><h1>Payments<span className="olive-dot">.</span></h1><p>Everything is ready for Stripe, whenever you are.</p></div></div><div className="payments-layout"><div className="payment-main"><div className="stripe-head"><div className="stripe-mark">S</div><div><h2>Stripe Checkout</h2><p>Secure, hosted payment processing</p></div><span className={`connection-status ${stripe.ready ? 'connected' : ''}`}><span/> {stripe.ready ? 'Configured' : 'Not connected'}</span></div><div className="stripe-description"><strong>{stripe.ready ? 'Your Stripe extension is active.' : 'Connect your Stripe account when you’re ready.'}</strong><p>{stripe.ready ? 'Customers can proceed to Stripe Checkout for real products. Confirm your webhook is receiving events before launching.' : 'Your catalog and shopping bag already work. Payment collection stays disabled until the server has the Stripe keys and you enable the integration.'}</p></div><div className="config-checklist">{rows.map(([label, yes]) => <div key={label}><span className={`check-box ${yes ? 'checked' : ''}`}>{yes ? <Check size={14}/> : <span/>}</span><span>{label}</span><strong>{yes ? 'Configured' : 'Pending'}</strong></div>)}</div><div className="payment-foot"><LockKeyhole size={17}/><span>API keys belong on the server, never in the browser or public code.</span></div></div><aside className="payment-help"><div className="help-icon"><CreditCard size={22}/></div><h3>How to connect later</h3><ol><li>Create or open your Stripe account.</li><li>Add the Stripe secret key to your server’s <code>.env</code> file.</li><li>Register <code>/api/payments/stripe/webhook</code> in Stripe and add its signing secret.</li><li>Set your public site URL and switch <code>STRIPE_ENABLED=true</code>.</li><li>Test a payment and webhook before taking live orders.</li></ol><a href="https://docs.stripe.com/checkout/quickstart" target="_blank" rel="noreferrer">Stripe setup guide <ArrowUpRight size={15}/></a></aside></div><div className="payment-warning"><ShieldCheck size={20}/><div><strong>Built-in protection</strong><p>Product prices are checked on the server, Stripe verifies payments, and orders are marked paid only after a verified webhook event.</p></div></div></>;
 }
-createRoot(document.getElementById('root')).render(<App/>);
+const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+if (!publishableKey) {
+  createRoot(document.getElementById('root')).render(<div style={{padding:40,fontFamily:'sans-serif'}}><h1>MNMWhole setup required</h1><p>Configure VITE_CLERK_PUBLISHABLE_KEY to enable customer authentication.</p></div>);
+} else {
+  const pathname = window.location.pathname;
+  const page = pathname.startsWith('/sign-in') ? <SignIn routing="path" path="/sign-in" signUpUrl="/sign-up" /> :
+    pathname.startsWith('/sign-up') ? <SignUp routing="path" path="/sign-up" signInUrl="/sign-in" /> : <App />;
+  createRoot(document.getElementById('root')).render(<ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/sign-in"><div style={pathname.startsWith('/sign-') ? {minHeight:'100vh',display:'grid',placeItems:'center',background:'#f9f8f5'} : {}}>{page}</div></ClerkProvider>);
+}
