@@ -116,10 +116,8 @@ app.post('/api/customer/access', accessCors, express.json({ limit: '5kb' }), (re
   res.setHeader('Set-Cookie', `mm_customer=${customerToken()}; Max-Age=1209600; HttpOnly; Path=/; SameSite=Lax${isProduction ? '; Secure' : ''}`);
   res.json({ ok: true });
 });
-app.get('/access', (req,res) => {
-  if (getAuth(req).userId || customerSession(req) || isAdmin(req)) return res.redirect('/');
-  res.type('html').send(accessPage);
-});
+app.get('/access', (_req, res) => res.redirect('/sign-in'));
+
 
 
 // IMPORTANT: Stripe needs the unparsed request body to verify webhook signatures.
@@ -313,7 +311,7 @@ if (fs.existsSync(dist)) {
   app.use(express.static(dist, { index: false }));
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found.' });
-    if (!getAuth(req).userId && !customerSession(req) && !isAdmin(req)) return res.redirect('/access');
+    if (!req.path.startsWith('/sign-in') && !req.path.startsWith('/sign-up') && !getAuth(req).userId && !customerSession(req) && !isAdmin(req)) return res.redirect('/sign-in');
     res.sendFile(path.join(dist, 'index.html'));
   });
 }
